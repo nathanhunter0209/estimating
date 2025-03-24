@@ -1,0 +1,1830 @@
+---
+title: "Estimates"
+output: word_document
+date: "2025-03-19"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+library(haven)
+
+# Import SPSS file
+data <- read_sav("estimatingoverviewFeb132025.sav")
+
+# View the first few rows
+head(data)
+
+write.csv(data, "estimatingoverview.csv", row.names = FALSE)
+
+```
+
+```{r}
+library(tidyverse)
+library(caret)
+library(randomForest)
+
+# Load dataset
+file_path <- "estimatingoverview.csv"  # Ensure the correct file path
+df <- read.csv(file_path)
+
+# Convert categorical variables to factors
+df$Status <- as.factor(df$Status)  # Target variable
+df$ClientType <- as.factor(df$ClientType)
+df$ProjType <- as.factor(df$ProjType)
+df$City <- as.factor(df$City)
+df$State <- as.factor(df$State)
+
+# Scale numerical variables
+df[, c("Amount", "EstOHP", "Percentof")] <- scale(df[, c("Amount", "EstOHP", "Percentof")])
+
+# Train-test split (80-20)
+set.seed(42)
+trainIndex <- createDataPartition(df$Status, p = 0.8, list = FALSE)
+trainData <- df[trainIndex, ]
+testData <- df[-trainIndex, ]
+
+# Train a Random Forest model
+rf_model <- randomForest(Status ~ ., data = trainData, ntree = 100, importance = TRUE)
+
+# Make predictions
+predictions <- predict(rf_model, testData)
+
+# Model evaluation
+conf_matrix <- confusionMatrix(predictions, testData$Status)
+print(conf_matrix)
+
+# Feature importance analysis
+importance_df <- as.data.frame(importance(rf_model))
+importance_df$Feature <- rownames(importance_df)
+importance_df <- importance_df %>% arrange(desc(MeanDecreaseGini))
+
+# Display feature importance
+print(importance_df)
+
+# Plot feature importance
+ggplot(importance_df, aes(x = reorder(Feature, MeanDecreaseGini), y = MeanDecreaseGini)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Feature Importance in Winning/Losing Projects", x = "Features", y = "Importance")
+```
+
+```{r}
+
+# Importance
+
+# Load libraries
+library(tidyverse)
+library(caret)
+library(randomForest)
+
+# Load dataset
+file_path <- "estimatingoverview.csv"
+df <- read.csv(file_path)
+
+# Convert categorical variables to factors
+df$Status <- as.factor(df$Status)  # Target variable
+df$ClientType <- as.factor(df$ClientType)
+df$ProjType <- as.factor(df$ProjType)
+df$City <- as.factor(df$City)
+df$State <- as.factor(df$State)
+
+# Scale numerical variables
+df[, c("Amount", "EstOHP", "Percentof")] <- scale(df[, c("Amount", "EstOHP", "Percentof")])
+
+# 📊 1. Check Win Rate by Category
+win_rate_by_category <- df %>%
+  group_by(ClientType) %>%
+  summarize(WinRate = mean(as.numeric(Status) - 1), Count = n()) %>%
+  arrange(desc(WinRate))
+
+print(win_rate_by_category)
+
+# 📊 2. Check Win Rate by Project Type
+win_rate_by_projtype <- df %>%
+  group_by(ProjType) %>%
+  summarize(WinRate = mean(as.numeric(Status) - 1), Count = n()) %>%
+  arrange(desc(WinRate))
+
+print(win_rate_by_projtype)
+
+# 📊 3. Check Win Rate by City
+win_rate_by_city <- df %>%
+  group_by(City) %>%
+  summarize(WinRate = mean(as.numeric(Status) - 1), Count = n()) %>%
+  arrange(desc(WinRate))
+
+print(win_rate_by_city)
+
+# 📈 4. Visualize Win Rate by Project Type
+ggplot(win_rate_by_projtype, aes(x = reorder(ProjType, WinRate), y = WinRate)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Win Rate by Project Type", x = "Project Type", y = "Win Rate")
+
+# 📈 5. Logistic Regression to Identify Key Predictors
+log_model <- glm(Status ~ Amount + EstOHP + Percentof + ClientType + ProjType + City + State, 
+                 data = df, family = binomial)
+
+summary(log_model)  # Identify significant predictors
+
+# 📊 6. Feature Importance from Logistic Regression
+exp(coefficients(log_model))  # Exponentiated coefficients to interpret odds
+```
+
+```{r}
+library(dplyr)
+
+data <- read.csv("estimatingoverview.csv")
+
+# Convert categorical variables to factors
+data$ProjType <- as.factor(data$ProjType)
+data$Status <- as.factor(data$Status)  # Assuming Status indicates win/loss
+
+# Determine the ideal overhead and profit % based on wins/losses
+optimal_ohp <- data %>% 
+  group_by(ProjType, Status) %>% 
+  summarise(
+    Avg_EstOHP = mean(EstOHP, na.rm = TRUE),
+    Avg_Percentof = mean(Percentof, na.rm = TRUE),
+    Count = n()
+  ) %>%
+  filter(Status == 1) %>%  # Assuming 1 indicates a win
+  arrange(desc(Count))
+
+# Print results
+print(optimal_ohp)
+```
+
+```{r}
+
+library(dplyr)
+library(forecast)
+library(tseries)
+
+# Load dataset
+data <- read.csv("estimatingoverview.csv")
+
+# Convert categorical variables to factors
+data$ProjType <- as.factor(data$ProjType)
+data$ClientType <- as.factor(data$ClientType)
+
+# Create a synthetic time component (assuming data is sequential)
+data$Index <- 1:nrow(data)  # Create an index as a proxy for time
+
+# Aggregate data by Index (sum or mean based on needs)
+time_series_data <- data %>% group_by(Index) %>% summarise(Total_Amount = sum(Amount, na.rm = TRUE))
+
+# Convert to time series format
+ts_data <- ts(time_series_data$Total_Amount, frequency = 12)
+
+# Train ARIMA model for time series forecasting
+arima_model <- auto.arima(ts_data)
+
+# Print model summary
+print(summary(arima_model))
+
+# Forecast next 12 periods
+forecasted_values <- forecast(arima_model, h=12)
+
+# Print forecasted results
+print(forecasted_values)
+
+# Plot the forecast
+plot(forecasted_values)
+
+# Save results to CSV
+forecast_results <- data.frame(Index = (max(time_series_data$Index) + 1):(max(time_series_data$Index) + 12),
+                               Forecasted_Amount = forecasted_values$mean)
+write.csv(forecast_results, "forecasted_amount.csv", row.names = FALSE)
+
+# Display forecast results in R console
+print(head(forecast_results))
+
+
+```
+
+```{r}
+library(dplyr)
+library(forecast)
+library(tseries)
+
+# Load dataset
+data <- read.csv("estimatingoverview.csv")
+
+# Convert categorical variables to factors
+data$ProjType <- as.factor(data$ProjType)
+data$ClientType <- as.factor(data$ClientType)
+
+# Create a synthetic time component (assuming data is sequential)
+data$Index <- 1:nrow(data)  # Create an index as a proxy for time
+
+# Aggregate data by Index (sum or mean based on needs)
+time_series_data <- data %>% group_by(Index) %>% summarise(Total_Amount = sum(Amount, na.rm = TRUE))
+
+# Convert to time series format
+ts_data <- ts(time_series_data$Total_Amount, frequency = 12)
+
+# Train Exponential Smoothing (ETS) model
+ets_model <- ets(ts_data)
+
+# Print model summary
+print(summary(ets_model))
+
+# Forecast next 12 periods
+forecasted_values <- forecast(ets_model, h=12)
+
+# Print forecasted results
+print(forecasted_values)
+
+# Plot the forecast
+plot(forecasted_values)
+
+# Save results to CSV
+forecast_results <- data.frame(Index = (max(time_series_data$Index) + 1):(max(time_series_data$Index) + 12),
+                               Forecasted_Amount = forecasted_values$mean)
+write.csv(forecast_results, "forecasted_amount.csv", row.names = FALSE)
+
+# Display forecast results in R console
+print(head(forecast_results))
+
+```
+
+```{r}
+
+# Load libraries
+library(tidyverse)
+library(caret)
+
+# Load dataset
+file_path <- "estimatingoverview.csv"
+df <- read.csv(file_path)
+
+# Convert categorical variables to factors
+df$Status <- as.factor(df$Status)  # Target variable
+df$ProjType <- as.factor(df$ProjType)
+
+# 📊 1. Calculate Average EstOHP for Won Projects by Project Type
+avg_estohp_won <- df %>%
+  filter(Status == 1) %>%  # Consider only won projects
+  group_by(ProjType) %>%
+  summarize(Avg_EstOHP = mean(EstOHP, na.rm = TRUE), Count = n()) %>%
+  arrange(desc(Avg_EstOHP))
+
+print(avg_estohp_won)
+
+# 📊 2. Compare EstOHP for Won vs. Lost Projects by Project Type (Ensure Both Exist)
+estohp_comparison <- df %>%
+  group_by(ProjType, Status) %>%
+  summarize(Avg_EstOHP = mean(EstOHP, na.rm = TRUE), Count = n(), .groups = "drop") %>%
+  pivot_wider(names_from = Status, values_from = Avg_EstOHP, names_prefix = "Status_", values_fill = list(Avg_EstOHP = 0))
+
+print(estohp_comparison)
+
+# Ensure columns exist before visualization
+if(!"Status_0" %in% colnames(estohp_comparison)) estohp_comparison$Status_0 <- 0
+if(!"Status_1" %in% colnames(estohp_comparison)) estohp_comparison$Status_1 <- 0
+
+# 📈 3. Visualize EstOHP Difference Between Won & Lost Projects
+ggplot(estohp_comparison, aes(x = ProjType)) +
+  geom_bar(aes(y = Status_1, fill = "Won Projects"), stat = "identity", position = "dodge", alpha = 0.7) +
+  geom_bar(aes(y = Status_0, fill = "Lost Projects"), stat = "identity", position = "dodge", alpha = 0.7) +
+  labs(title = "Average EstOHP for Won vs. Lost Projects by Project Type",
+       x = "Project Type", y = "Average EstOHP") +
+  theme_minimal() +
+  scale_fill_manual(values = c("Won Projects" = "steelblue", "Lost Projects" = "red"))
+
+# 📈 4. Regression Model to Predict Optimal EstOHP
+estohp_model <- lm(EstOHP ~ ProjType + Amount + Status, data = df)
+summary(estohp_model)  # Check which factors influence EstOHP
+
+# 📊 5. Predict Optimal EstOHP for Each Project Type (Fixing Factor Issue)
+optimal_estohp <- df %>%
+  group_by(ProjType) %>%
+  summarize(Predicted_EstOHP = predict(estohp_model, 
+                                       newdata = data.frame(ProjType = unique(df$ProjType), 
+                                                            Amount = mean(df$Amount, na.rm = TRUE), 
+                                                            Status = factor(1, levels = levels(df$Status))), 
+                                       type = "response"),
+            .groups = "drop")
+
+print(optimal_estohp)
+
+```
+
+```{r}
+
+
+# Load libraries
+library(tidyverse)
+library(caret)
+library(randomForest)
+
+# Load dataset
+file_path <- "estimatingoverview.csv"
+df <- read.csv(file_path)
+
+# Check column names to ensure they exist
+print(names(df))
+
+# Convert categorical variables to factors
+df$Status <- as.factor(df$Status)  # Target variable (1 = Won, 0 = Lost)
+df$ClientType <- as.factor(df$ClientType)
+df$ProjType <- as.factor(df$ProjType)
+df$City <- as.factor(df$City)
+df$State <- as.factor(df$State)
+
+# Update project type labels
+proj_type_labels <- c(
+  "1" = "Wastewater Treatment",
+  "2" = "General Industrial",
+  "3" = "Tank Ring",
+  "4" = "Refinery",
+  "5" = "Industrial Process",
+  "6" = "Utility",
+  "7" = "Civil and Foundation",
+  "8" = "Demolition",
+  "9" = "Piping Replacement",
+  "10" = "Environmental",
+  "11" = "Water Treatment",
+  "12" = "Pipeline"
+)
+
+df$ProjType_Label <- factor(as.character(df$ProjType), levels = names(proj_type_labels), labels = proj_type_labels)
+
+# Handle missing values
+if (!"EstOHP" %in% names(df)) {
+  df$EstOHP <- 0  # Assign default value if missing
+  warning("⚠️ 'EstOHP' column not found. Defaulting to 0 in model.")
+}
+
+# Remove rows where Amount or EstOHP is zero or negative to prevent unrealistic percentages
+df <- df %>% filter(Amount > 0, EstOHP > 0)
+
+# Compute the ideal EstOHP percentage per project type to maximize win probability
+ideal_estohp <- df %>%
+  filter(Status == 1) %>%  # Consider only won projects
+  group_by(ProjType_Label) %>%
+  summarize(Ideal_EstOHP_Percent = median((EstOHP / Amount) * 100, na.rm = TRUE), .groups = "drop")  # Convert to percentage
+
+print(ideal_estohp)
+
+# Visualize Ideal EstOHP Percentage per Project Type with Percentage Labels
+ggplot(ideal_estohp, aes(x = reorder(ProjType_Label, Ideal_EstOHP_Percent), y = Ideal_EstOHP_Percent)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  geom_text(aes(label = paste0(round(Ideal_EstOHP_Percent, 1), "%")), hjust = -0.2, size = 2.5) +  # Increase label size
+  coord_flip() +
+  labs(title = "Ideal Overhead & Profit (%) Per Project Type to Win", x = "Project Type", y = "Ideal EstOHP (%)") +
+  theme_minimal() +
+  theme(plot.margin = unit(c(1, 4, 1, 1), "cm"))  # Fix margin format
+
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(randomForest)
+
+# Load updated dataset
+data <- read.csv("estimatingoverview3.20.25.csv")
+
+# Convert categorical variables to factors
+data$ProjType <- as.factor(data$ProjType)
+data$ClientType <- as.factor(data$ClientType)
+
+# Update project type labels using a named vector
+proj_type_labels <- c(
+  "1" = "Wastewater Treatment",
+  "2" = "General Industrial",
+  "3" = "Tank Ring",
+  "4" = "Refinery",
+  "5" = "Industrial Process",
+  "6" = "Utility",
+  "7" = "Civil and Foundation",
+  "8" = "Demolition",
+  "9" = "Piping Replacement",
+  "10" = "Environmental",
+  "11" = "Water Treatment",
+  "12" = "Pipeline"
+)
+
+data$ProjType <- as.character(data$ProjType)
+data$ProjType <- proj_type_labels[data$ProjType]
+data$ProjType <- as.factor(data$ProjType)
+
+# A/B Testing for Pricing Strategies
+# Assume we have two pricing strategies (A and B)
+data$PricingStrategy <- sample(c("A", "B"), nrow(data), replace = TRUE)
+
+# Simulate revenue generated under each strategy
+data$Revenue <- data$Amount * ifelse(data$PricingStrategy == "A", runif(nrow(data), 0.9, 1.1), runif(nrow(data), 0.8, 1.2))
+
+# Compare mean revenue between strategies
+ab_test_results <- data %>% group_by(PricingStrategy) %>% summarise(Avg_Revenue = mean(Revenue, na.rm = TRUE))
+print(ab_test_results)
+
+# Perform t-test to see if the difference is statistically significant
+t_test_results <- t.test(Revenue ~ PricingStrategy, data = data)
+print(t_test_results)
+
+# Plot the results
+ggplot(data, aes(x = PricingStrategy, y = Revenue, fill = PricingStrategy)) +
+  geom_boxplot() +
+  ggtitle("A/B Testing for Pricing Strategies") +
+  theme_minimal()
+
+# Save results to CSV
+write.csv(ab_test_results, "ab_test_results.csv", row.names = FALSE)
+
+# Investigate why certain project types have lower win rates
+win_rates <- data %>%
+  group_by(ProjType) %>%
+  summarise(
+    Total_Bids = n(),
+    Wins = sum(Status == 1, na.rm = TRUE),
+    Win_Rate = Wins / Total_Bids,
+    Avg_Amount = mean(Amount, na.rm = TRUE),
+    Avg_EstOHP = mean(EstOHP, na.rm = TRUE),
+    Avg_Percentof = mean(Percentof, na.rm = TRUE)
+  ) %>%
+  arrange(Win_Rate)
+
+print(win_rates)
+write.csv(win_rates, "win_rate_analysis.csv", row.names = FALSE)
+
+# Plot win rates
+ggplot(win_rates, aes(x = reorder(ProjType, Win_Rate), y = Win_Rate, fill = Win_Rate)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Win Rate Analysis by Project Type") +
+  theme_minimal()
+
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(randomForest)
+
+# Load dataset
+data <- read.csv("estimatingoverview.csv")
+
+# Convert categorical variables to factors
+data$ProjType <- as.factor(data$ProjType)
+data$ClientType <- as.factor(data$ClientType)
+
+# Update project type labels using a named vector
+proj_type_labels <- c(
+  "1" = "Wastewater Treatment",
+  "2" = "General Industrial",
+  "3" = "Tank Ring",
+  "4" = "Refinery",
+  "5" = "Industrial Process",
+  "6" = "Utility",
+  "7" = "Civil and Foundation",
+  "8" = "Demolition",
+  "9" = "Piping Replacement",
+  "10" = "Environmental",
+  "11" = "Water Treatment",
+  "12" = "Pipeline"
+)
+
+data$ProjType <- as.character(data$ProjType)
+data$ProjType <- proj_type_labels[data$ProjType]
+data$ProjType <- as.factor(data$ProjType)
+
+# Train a Random Forest model to determine the optimal Overhead & Profit %
+set.seed(123)
+trainIndex <- sample(1:nrow(data), 0.8 * nrow(data))
+trainData <- data[trainIndex, ]
+testData <- data[-trainIndex, ]
+
+# Train the model to predict Percentof based on project features
+rf_model <- randomForest(Percentof ~ ProjType + ClientType + Amount + EstOHP, data = trainData, ntree = 100, importance = TRUE)
+
+# Predict optimal OH&P % for each project type
+predicted_ohp <- predict(rf_model, newdata = testData)
+testData$Predicted_Percentof <- predicted_ohp
+
+# Aggregate optimal values per project type
+optimal_ohp <- testData %>%
+  group_by(ProjType) %>%
+  summarise(Optimal_Percentof = mean(Predicted_Percentof, na.rm = TRUE)) %>%
+  arrange(desc(Optimal_Percentof))
+
+print(optimal_ohp)
+write.csv(optimal_ohp, "optimal_ohp_analysis.csv", row.names = FALSE)
+
+# Plot optimal Overhead & Profit % as a bar chart
+optimal_ohp_plot <- ggplot(optimal_ohp, aes(x = reorder(ProjType, Optimal_Percentof), y = Optimal_Percentof, fill = Optimal_Percentof)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Predicted Optimal Overhead & Profit Percentage by Project Type") +
+  ylab("Optimal OH&P (%)") +
+  xlab("Project Type") +
+  theme_minimal()
+
+print(optimal_ohp_plot)
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(randomForest)
+
+# Load updated dataset
+data <- read.csv("estimatingoverview3.20.25.csv")
+
+# Convert categorical variables to factors
+data$ProjType <- as.factor(data$ProjType)
+data$ClientType <- as.factor(data$ClientType)
+
+# Update project type labels using a named vector
+proj_type_labels <- c(
+  "1" = "Wastewater Treatment",
+  "2" = "General Industrial",
+  "3" = "Tank Ring",
+  "4" = "Refinery",
+  "5" = "Industrial Process",
+  "6" = "Utility",
+  "7" = "Civil and Foundation",
+  "8" = "Demolition",
+  "9" = "Piping Replacement",
+  "10" = "Environmental",
+  "11" = "Water Treatment",
+  "12" = "Pipeline"
+)
+
+data$ProjType <- as.character(data$ProjType)
+data$ProjType <- proj_type_labels[data$ProjType]
+data$ProjType <- as.factor(data$ProjType)
+
+# Train a Random Forest model to determine the optimal Overhead & Profit %
+set.seed(123)
+trainIndex <- sample(1:nrow(data), 0.8 * nrow(data))
+trainData <- data[trainIndex, ]
+testData <- data[-trainIndex, ]
+
+# Train the model to predict Percentof based on project features
+rf_model <- randomForest(Percentof ~ ProjType + ClientType + Amount + EstOHP, data = trainData, ntree = 100, importance = TRUE)
+
+# Predict optimal OH&P % for each project type
+predicted_ohp <- predict(rf_model, newdata = testData)
+testData$Predicted_Percentof <- predicted_ohp
+
+# Aggregate optimal values per project type
+optimal_ohp <- testData %>%
+  group_by(ProjType) %>%
+  summarise(Optimal_Percentof = mean(Predicted_Percentof, na.rm = TRUE)) %>%
+  arrange(desc(Optimal_Percentof))
+
+print(optimal_ohp)
+write.csv(optimal_ohp, "optimal_ohp_analysis.csv", row.names = FALSE)
+
+# Plot optimal Overhead & Profit % as a bar chart
+optimal_ohp_plot <- ggplot(optimal_ohp, aes(x = reorder(ProjType, Optimal_Percentof), y = Optimal_Percentof, fill = Optimal_Percentof)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Predicted Optimal Overhead & Profit Percentage by Project Type") +
+  ylab("Optimal OH&P (%)") +
+  xlab("Project Type") +
+  theme_minimal()
+
+print(optimal_ohp_plot)
+
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(randomForest)
+
+# Load updated dataset
+data <- read.csv("estimatingoverview3.20.25.csv")
+
+# Convert categorical variables to factors
+data$ProjType <- as.factor(data$ProjType)
+data$ClientType <- as.factor(data$ClientType)
+data$Status <- as.factor(data$Status)  # Assuming Status represents win/loss (1 = Win, 0 = Loss)
+
+# Update project type labels using a named vector
+proj_type_labels <- c(
+  "1" = "Wastewater Treatment",
+  "2" = "General Industrial",
+  "3" = "Tank Ring",
+  "4" = "Refinery",
+  "5" = "Industrial Process",
+  "6" = "Utility",
+  "7" = "Civil and Foundation",
+  "8" = "Demolition",
+  "9" = "Piping Replacement",
+  "10" = "Environmental",
+  "11" = "Water Treatment",
+  "12" = "Pipeline"
+)
+
+data$ProjType <- as.character(data$ProjType)
+data$ProjType <- proj_type_labels[data$ProjType]
+data$ProjType <- as.factor(data$ProjType)
+
+# Train a Random Forest model to determine feature importance in wins/losses
+set.seed(123)
+trainIndex <- sample(1:nrow(data), 0.8 * nrow(data))
+trainData <- data[trainIndex, ]
+testData <- data[-trainIndex, ]
+
+# Train the model to predict win/loss status based on project features
+rf_win_model <- randomForest(Status ~ ProjType + ClientType + Amount + EstOHP, data = trainData, ntree = 100, importance = TRUE)
+
+# Get feature importance
+feature_importance <- importance(rf_win_model)
+feature_importance_df <- data.frame(Feature = rownames(feature_importance), Importance = feature_importance[, 1])
+feature_importance_df <- feature_importance_df %>% arrange(desc(Importance))
+
+print(feature_importance_df)
+write.csv(feature_importance_df, "feature_importance_analysis.csv", row.names = FALSE)
+
+# Plot feature importance
+feature_importance_plot <- ggplot(feature_importance_df, aes(x = reorder(Feature, Importance), y = Importance, fill = Importance)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Feature Importance in Win/Loss Prediction") +
+  ylab("Importance Score") +
+  xlab("Feature") +
+  theme_minimal()
+
+print(feature_importance_plot)
+
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(randomForest)
+
+# Load updated dataset
+data <- read.csv("estimatingoverview3.20.25.csv")
+
+# Convert categorical variables to factors
+data$ProjType <- as.factor(data$ProjType)
+data$ClientType <- as.factor(data$ClientType)
+
+# Update project type labels using a named vector
+proj_type_labels <- c(
+  "1" = "Wastewater Treatment",
+  "2" = "General Industrial",
+  "3" = "Tank Ring",
+  "4" = "Refinery",
+  "5" = "Industrial Process",
+  "6" = "Utility",
+  "7" = "Civil and Foundation",
+  "8" = "Demolition",
+  "9" = "Piping Replacement",
+  "10" = "Environmental",
+  "11" = "Water Treatment",
+  "12" = "Pipeline"
+)
+
+data$ProjType <- as.character(data$ProjType)
+data$ProjType <- proj_type_labels[data$ProjType]
+data$ProjType <- as.factor(data$ProjType)
+
+# A/B Testing for Pricing Strategies
+# Assume we have two pricing strategies (A and B)
+data$PricingStrategy <- sample(c("A", "B"), nrow(data), replace = TRUE)
+
+# Simulate revenue generated under each strategy
+data$Revenue <- data$Amount * ifelse(data$PricingStrategy == "A", runif(nrow(data), 0.9, 1.1), runif(nrow(data), 0.8, 1.2))
+
+# Compare mean revenue between strategies
+ab_test_results <- data %>% group_by(PricingStrategy) %>% summarise(Avg_Revenue = mean(Revenue, na.rm = TRUE))
+print(ab_test_results)
+
+# Perform t-test to see if the difference is statistically significant
+t_test_results <- t.test(Revenue ~ PricingStrategy, data = data)
+print(t_test_results)
+
+# Plot the results
+ggplot(data, aes(x = PricingStrategy, y = Revenue, fill = PricingStrategy)) +
+  geom_boxplot() +
+  ggtitle("A/B Testing for Pricing Strategies") +
+  theme_minimal()
+
+# Save results to CSV
+write.csv(ab_test_results, "ab_test_results.csv", row.names = FALSE)
+
+# Investigate why certain project types have lower win rates
+win_rates <- data %>%
+  group_by(ProjType) %>%
+  summarise(
+    Total_Bids = n(),
+    Wins = sum(Status == 1, na.rm = TRUE),
+    Win_Rate = Wins / Total_Bids,
+    Avg_Amount = mean(Amount, na.rm = TRUE),
+    Avg_EstOHP = mean(EstOHP, na.rm = TRUE),
+    Avg_Percentof = mean(Percentof, na.rm = TRUE)
+  ) %>%
+  arrange(Win_Rate)
+
+print(win_rates)
+write.csv(win_rates, "win_rate_analysis.csv", row.names = FALSE)
+
+# Plot win rates
+ggplot(win_rates, aes(x = reorder(ProjType, Win_Rate), y = Win_Rate, fill = Win_Rate)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Win Rate Analysis by Project Type") +
+  theme_minimal()
+
+# Project Type Success Rate & Profitability Analysis
+project_profitability <- data %>%
+  group_by(ProjType) %>%
+  summarise(
+    Avg_Win_Rate = mean(Status == 1, na.rm = TRUE),
+    Avg_Profit = mean(Amount * (Percentof / 100), na.rm = TRUE)
+  )
+
+print(project_profitability)
+write.csv(project_profitability, "project_profitability_analysis.csv", row.names = FALSE)
+
+# Plot profitability by project type
+ggplot(project_profitability, aes(x = reorder(ProjType, Avg_Profit), y = Avg_Profit, fill = Avg_Profit)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Profitability by Project Type") +
+  ylab("Average Profit ($)") +
+  xlab("Project Type") +
+  theme_minimal()
+
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(randomForest)
+
+# Load updated dataset
+data <- read.csv("estimatingoverview3.20.25.csv")
+
+# Convert categorical variables to factors
+data$ProjType <- as.factor(data$ProjType)
+data$ClientType <- as.factor(data$ClientType)
+
+# Update project type labels using a named vector
+proj_type_labels <- c(
+  "1" = "Wastewater Treatment",
+  "2" = "General Industrial",
+  "3" = "Tank Ring",
+  "4" = "Refinery",
+  "5" = "Industrial Process",
+  "6" = "Utility",
+  "7" = "Civil and Foundation",
+  "8" = "Demolition",
+  "9" = "Piping Replacement",
+  "10" = "Environmental",
+  "11" = "Water Treatment",
+  "12" = "Pipeline"
+)
+
+data$ProjType <- as.character(data$ProjType)
+data$ProjType <- proj_type_labels[data$ProjType]
+data$ProjType <- as.factor(data$ProjType)
+
+# A/B Testing for Pricing Strategies
+# Assume we have two pricing strategies (A and B)
+data$PricingStrategy <- sample(c("A", "B"), nrow(data), replace = TRUE)
+
+# Simulate revenue generated under each strategy
+data$Revenue <- data$Amount * ifelse(data$PricingStrategy == "A", runif(nrow(data), 0.9, 1.1), runif(nrow(data), 0.8, 1.2))
+
+# Compare mean revenue between strategies
+ab_test_results <- data %>% group_by(PricingStrategy) %>% summarise(Avg_Revenue = mean(Revenue, na.rm = TRUE))
+print(ab_test_results)
+
+# Perform t-test to see if the difference is statistically significant
+t_test_results <- t.test(Revenue ~ PricingStrategy, data = data)
+print(t_test_results)
+
+# Plot the results
+ggplot(data, aes(x = PricingStrategy, y = Revenue, fill = PricingStrategy)) +
+  geom_boxplot() +
+  ggtitle("A/B Testing for Pricing Strategies") +
+  theme_minimal()
+
+# Save results to CSV
+write.csv(ab_test_results, "ab_test_results.csv", row.names = FALSE)
+
+# Investigate why certain project types have lower win rates
+win_rates <- data %>%
+  group_by(ProjType) %>%
+  summarise(
+    Total_Bids = n(),
+    Wins = sum(Status == 1, na.rm = TRUE),
+    Win_Rate = Wins / Total_Bids,
+    Avg_Amount = mean(Amount, na.rm = TRUE),
+    Avg_EstOHP = mean(EstOHP, na.rm = TRUE),
+    Avg_Percentof = mean(Percentof, na.rm = TRUE)
+  ) %>%
+  arrange(Win_Rate)
+
+print(win_rates)
+write.csv(win_rates, "win_rate_analysis.csv", row.names = FALSE)
+
+# Plot win rates
+ggplot(win_rates, aes(x = reorder(ProjType, Win_Rate), y = Win_Rate, fill = Win_Rate)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Win Rate Analysis by Project Type") +
+  theme_minimal()
+
+# Project Type Success Rate & Profitability Analysis
+project_profitability <- data %>%
+  group_by(ProjType) %>%
+  summarise(
+    Avg_Win_Rate = mean(Status == 1, na.rm = TRUE),
+    Avg_Profit = mean(Amount * (Percentof / 100), na.rm = TRUE)
+  )
+
+print(project_profitability)
+write.csv(project_profitability, "project_profitability_analysis.csv", row.names = FALSE)
+
+# Plot profitability by project type
+ggplot(project_profitability, aes(x = reorder(ProjType, Avg_Profit), y = Avg_Profit, fill = Avg_Profit)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Profitability by Project Type") +
+  ylab("Average Profit ($)") +
+  xlab("Project Type") +
+  theme_minimal()
+
+# Risk Analysis: Identifying High-Risk Projects
+risk_analysis <- data %>%
+  group_by(ProjType) %>%
+  summarise(
+    Avg_Amount = mean(Amount, na.rm = TRUE),
+    Amount_SD = sd(Amount, na.rm = TRUE),
+    Risk_Score = Amount_SD / Avg_Amount  # Coefficient of Variation as Risk Indicator
+  ) %>%
+  arrange(desc(Risk_Score))
+
+print(risk_analysis)
+write.csv(risk_analysis, "risk_analysis.csv", row.names = FALSE)
+
+# Plot risk levels by project type
+ggplot(risk_analysis, aes(x = reorder(ProjType, Risk_Score), y = Risk_Score, fill = Risk_Score)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  ggtitle("Risk Analysis by Project Type") +
+  ylab("Risk Score (Higher = More Risk)") +
+  xlab("Project Type") +
+  theme_minimal()
+
+```
+
+```{r}
+
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+
+# Load dataset (replace with actual file path if needed)
+df <- read.csv("estimatingoverview3.20.25.csv")
+
+# Clean the dataset: Remove missing values and ensure numeric columns
+df <- df %>%
+  filter(!is.na(Amount), !is.na(Percentof)) %>%
+  mutate(Amount = as.numeric(Amount),
+         Percentof = as.numeric(Percentof))
+
+# Fit a logarithmic regression model
+log_model <- lm(Percentof ~ log(Amount), data = df)
+
+# Predict OH&P percentage for a $20,000,000 project
+predicted_percent <- predict(log_model, newdata = data.frame(Amount = 20000000))
+predicted_OHP <- (predicted_percent / 100) * 20000000
+
+# Print results
+print(paste("Predicted OH&P Percentage:", round(predicted_percent, 2), "%"))
+print(paste("Predicted OH&P Amount: $", round(predicted_OHP, 2)))
+
+# Plot the regression trend
+ggplot(df, aes(x = Amount, y = Percentof)) +
+  geom_point(alpha = 0.5) +  # Scatter plot of actual data
+  geom_smooth(method = "lm", formula = y ~ log(x), color = "red", se = FALSE) +  # Regression line
+  scale_x_continuous(labels = scales::dollar_format()) +  # Format x-axis in dollars
+  labs(title = "OH&P Percentage vs. Project Amount",
+       x = "Project Amount ($)",
+       y = "OH&P Percentage (%)") +
+  theme_minimal()
+
+
+```
+
+```{r}
+
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+library(scales)  # For dollar formatting
+
+# Load dataset (replace with actual file path if needed)
+df <- read.csv("estimatingoverview3.20.25.csv")
+
+# Clean the dataset: Remove missing values and ensure numeric columns
+df <- df %>%
+  filter(!is.na(Amount), !is.na(Percentof), !is.na(Status)) %>%
+  mutate(Amount = as.numeric(Amount),
+         Percentof = as.numeric(Percentof),
+         Status = as.factor(Status))  # Convert Status to factor for color coding
+
+# Fit a logarithmic regression model
+log_model <- lm(Percentof ~ log(Amount), data = df)
+
+# Predict OH&P percentage for a $20,000,000 project
+predicted_percent <- predict(log_model, newdata = data.frame(Amount = 20000000))
+predicted_OHP <- (predicted_percent / 100) * 200000000
+
+# Print results
+print(paste("Predicted OH&P Percentage:", round(predicted_percent, 2), "%"))
+print(paste("Predicted OH&P Amount: $", round(predicted_OHP, 2)))
+
+# Create the plot
+ggplot(df, aes(x = Amount, y = Percentof, color = Status)) +
+  geom_point(alpha = 0.6) +  # Scatter plot of actual data
+  geom_smooth(method = "lm", formula = y ~ log(x), color = "black", se = FALSE) +  # Regression line
+  scale_x_continuous(labels = scales::dollar_format()) +  # Format x-axis in dollars
+  scale_color_manual(values = c("0" = "red", "1" = "blue"), labels = c("Lost", "Won")) +  # Color code wins/losses
+  labs(title = "OH&P Percentage vs. Project Amount",
+       x = "Project Amount ($)",
+       y = "OH&P Percentage (%)",
+       color = "Project Status") +
+  theme_minimal() +
+  # Add annotation for predicted OH&P
+  geom_point(aes(x = 20000000, y = predicted_percent), color = "black", size = 2) +  # Mark prediction point
+  geom_text(aes(x = 20000000, y = predicted_percent, 
+                label = paste0("Target OH&P:\n", round(predicted_percent, 2), "%\n$", 
+                               format(round(predicted_OHP, 2), big.mark=","))),
+            vjust = -1, hjust = 0.5, size = 3, color = "black")
+
+
+```
+
+```{r}
+
+# Load required libraries
+library(dplyr)
+library(ggplot2)
+
+# Load dataset (replace with actual file path if needed)
+df <- read.csv("estimatingoverview3.20.25.csv")
+
+# Data Cleaning
+df <- df %>%
+  filter(Status %in% c(1, 2)) %>%  # Keep only won (1) and lost (2) projects
+  mutate(Win_Status = ifelse(Status == 1, 1, 0),  # Convert to binary (1 = Won, 0 = Lost)
+         ProjType = as.factor(ProjType))  # Ensure project type is categorical
+
+# Mapping Project Type numbers to descriptive names
+project_type_map <- c(
+  "1" = "Wastewater Treatment",
+  "2" = "General Industrial",
+  "3" = "Tank Ring",
+  "4" = "Refinery",
+  "5" = "Industrial Process",
+  "6" = "Utility",
+  "7" = "Civil and Foundation",
+  "8" = "Demolition",
+  "9" = "Piping Replacement",
+  "10" = "Environmental",
+  "11" = "Water Treatment",
+  "12" = "Pipeline"
+)
+
+df$ProjType <- factor(df$ProjType, levels = names(project_type_map), labels = project_type_map)
+
+# Function to calculate max OH&P for a given probability
+max_ohp_for_prob <- function(model, desired_prob = 0.75) {
+  coef_vals <- coef(model)
+  if (length(coef_vals) < 2) return(NA)  # Skip if regression fails
+  intercept <- coef_vals[1]
+  slope <- coef_vals[2]
+  max_ohp <- (log(desired_prob / (1 - desired_prob)) - intercept) / slope
+  return(max_ohp)
+}
+
+# Apply logistic regression per project type
+results <- df %>%
+  group_by(ProjType) %>%
+  filter(n_distinct(Win_Status) > 1) %>%  # Only include project types with both wins & losses
+  do({
+    model <- tryCatch(glm(Win_Status ~ Percentof, data = ., family = binomial), 
+                      error = function(e) return(NULL))  # Handle errors
+    if (!is.null(model)) {
+      max_ohp <- max_ohp_for_prob(model, desired_prob = 0.75)
+      ideal_ohp <- max_ohp * 0.8  # Define the "ideal" OH&P as 80% of the max
+      data.frame(ProjType = unique(.$ProjType), Max_OH_P_Percentage = max_ohp, Ideal_OH_P_Percentage = ideal_ohp)
+    } else {
+      data.frame(ProjType = unique(.$ProjType), Max_OH_P_Percentage = NA, Ideal_OH_P_Percentage = NA)
+    }
+  })
+
+# Remove NAs from failed models
+results <- na.omit(results)
+
+# Print the results
+print(results)
+
+# Visualize results with main bars for max OH&P and smaller bars inside for ideal OH&P
+ggplot(results, aes(x = reorder(ProjType, -Max_OH_P_Percentage))) +
+  geom_bar(aes(y = Max_OH_P_Percentage), stat = "identity", fill = "steelblue", color = "black") +  # Outer bar (Max OH&P)
+  geom_bar(aes(y = Ideal_OH_P_Percentage), stat = "identity", fill = "orange", width = 0.5) +  # Inner bar (Ideal OH&P)
+  geom_text(aes(y = Max_OH_P_Percentage, label = paste0(round(Max_OH_P_Percentage, 2), "%")), vjust = -0.5, size = 5) +  
+  geom_text(aes(y = Ideal_OH_P_Percentage, label = paste0(round(Ideal_OH_P_Percentage, 2), "%")), vjust = 1.5, size = 4, color = "white") +  
+  labs(title = "Maximum vs. Ideal OH&P Percentage by Project Type (75% Win Probability)",
+       x = "Project Type",
+       y = "OH&P Percentage (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +  # Rotate labels for readability
+  coord_cartesian(ylim = c(0, max(results$Max_OH_P_Percentage) * 1.2))  # Zoom out the y-axis
+
+
+```
+
+```{r}
+
+# Load necessary libraries
+library(randomForest)
+library(caret)
+library(lubridate)
+library(ggplot2)
+library(dplyr)
+
+# Load dataset
+df <- read.csv("estimatingoverview3.20.25.csv")
+
+# Convert categorical variables to factors
+df$City <- as.factor(df$City)
+df$State <- as.factor(df$State)
+
+# Remove class 3 and keep only Win (1) and Loss (2)
+df <- df[df$Status %in% c(1, 2), ]
+
+# Normalize 'EstOHP' and 'Percentof'
+df$EstOHP <- scale(df$EstOHP)
+df$Percentof <- scale(df$Percentof)
+
+# Balance the dataset (Ensure 50/50 split between Wins & Losses)
+set.seed(42)
+wins <- df[df$Status == 1, ]
+losses <- df[df$Status == 2, ]
+num_wins <- nrow(wins)
+num_losses <- nrow(losses)
+
+# Downsample majority class (if necessary)
+if (num_losses > num_wins) {
+  losses <- losses[sample(1:num_losses, num_wins), ]
+} else if (num_wins > num_losses) {
+  wins <- wins[sample(1:num_wins, num_losses), ]
+}
+
+df_balanced <- rbind(wins, losses)  # Combine balanced data
+df_balanced <- df_balanced[sample(nrow(df_balanced)), ]  # Shuffle data
+
+# Split into training and test sets
+set.seed(42)
+train_index <- createDataPartition(df_balanced$Status, p = 0.8, list = FALSE)
+train_features <- df_balanced[train_index, !(names(df_balanced) %in% c("Status", "Amount"))]
+test_features <- df_balanced[-train_index, !(names(df_balanced) %in% c("Status", "Amount"))]
+train_status <- as.factor(df_balanced$Status[train_index])
+test_status <- as.factor(df_balanced$Status[-train_index])
+train_amount <- df_balanced$Amount[train_index]
+test_amount <- df_balanced$Amount[-train_index]
+
+# Train the Random Forest classifier for win/loss prediction
+rf_status <- randomForest(x = train_features, y = train_status, ntree = 200, mtry = 3, importance = TRUE)
+status_pred <- predict(rf_status, test_features)
+accuracy <- sum(status_pred == test_status) / length(test_status)
+print(paste("Win/Loss Accuracy:", round(accuracy * 100, 2), "%"))
+
+# Train the Random Forest regressor for amount prediction
+rf_amount <- randomForest(x = train_features, y = train_amount, ntree = 200, mtry = 3, importance = TRUE)
+amount_pred <- predict(rf_amount, test_features)
+mae <- mean(abs(amount_pred - test_amount))
+print(paste("Mean Absolute Error:", round(mae, 2)))
+
+# Forecasting for next 6 months from April 2025
+future_dates <- seq(ymd("2025-04-01"), by = "month", length.out = 6)
+future_features <- train_features[sample(nrow(train_features), 6, replace = TRUE), ]  # Generate diverse future data
+future_predictions_status <- predict(rf_status, future_features)
+future_predictions_amount <- predict(rf_amount, future_features)
+
+# Combine results
+forecast_results <- data.frame(
+  Date = future_dates,
+  Predicted_Status = future_predictions_status,
+  Predicted_Amount = round(future_predictions_amount, 2)
+)
+
+print(forecast_results)
+
+# Add win probability predictions
+future_prob_status <- predict(rf_status, future_features, type = "prob")[, "1"]
+
+# Add win probabilities to forecast results
+forecast_results$Win_Probability <- future_prob_status
+forecast_results$Source <- "Random Sampling"
+
+# Optional: Create a trend-based version
+# Generate linearly increasing amount and scaled EstOHP/Percentof
+base_amount <- mean(df_balanced$Amount)
+trend_amounts <- seq(base_amount, base_amount * 1.2, length.out = 6)
+trend_estohp <- scale(seq(mean(df$EstOHP), mean(df$EstOHP) * 1.2, length.out = 6))
+trend_percentof <- scale(seq(mean(df$Percentof), mean(df$Percentof) * 1.2, length.out = 6))
+
+trend_features <- future_features
+trend_features$Amount <- trend_amounts
+trend_features$EstOHP <- trend_estohp
+trend_features$Percentof <- trend_percentof
+
+# Predict on trend-based features
+trend_pred_status <- predict(rf_status, trend_features, type = "prob")[, "1"]
+
+trend_results <- data.frame(
+  Date = future_dates,
+  Win_Probability = trend_pred_status,
+  Source = "Trend-Based"
+)
+
+# Combine both sets
+combined_results <- bind_rows(
+  forecast_results[, c("Date", "Win_Probability", "Source")],
+  trend_results
+)
+
+# Plot
+ggplot(combined_results, aes(x = Date, y = Win_Probability, color = Source)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(title = "Win Probability Forecasts: Sampled vs Trend-Based",
+       x = "Forecast Month",
+       y = "Predicted Win Probability") +
+  theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_color_manual(values = c("Random Sampling" = "steelblue", "Trend-Based" = "darkgreen"))
+
+
+ggplot(forecast_results, aes(x = Date, y = Predicted_Amount, fill = Predicted_Status)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  geom_text(aes(label = scales::percent(Predicted_Amount / sum(Predicted_Amount))),
+            position = position_dodge(width = 0.9), vjust = -0.5, size = 4) +  # Add percentage labels
+  scale_fill_manual(values = c("1" = "steelblue", "2" = "tomato"), labels = c("Win", "Loss")) +
+  labs(title = "Forecasted Wins/Losses with Percentages",
+       x = "Date",
+       y = "Predicted Amount",
+       fill = "Win/Loss Status") +
+  theme_minimal()
+
+
+```
+
+```{r}
+
+library(shiny)
+library(randomForest)
+library(caret)
+library(lubridate)
+library(ggplot2)
+library(dplyr)
+library(DT)
+
+# Lookup for project type labels
+proj_type_labels <- c(
+  "1" = "Wastewater Treatment",
+  "2" = "General Industrial",
+  "3" = "Tank Ring",
+  "4" = "Refinery",
+  "5" = "Industrial Process",
+  "6" = "Utility",
+  "7" = "Civil and Foundation",
+  "8" = "Demolition",
+  "9" = "Piping Replacement",
+  "10" = "Environmental",
+  "11" = "Water Treatment",
+  "12" = "Pipeline"
+)
+
+# Load and preprocess data
+df <- read.csv("estimatingoverview3.20.25.csv")
+df$City <- as.factor(df$City)
+df$State <- as.factor(df$State)
+df <- df[df$Status %in% c(1, 2), ]
+
+# Label client types
+df$ClientType <- factor(df$ClientType, levels = c(1, 2), labels = c("Existing", "New"))
+
+# Save unscaled Percentof for OH&P modeling
+df$Percentof_raw <- df$Percentof
+
+# Normalize for ML use
+df$EstOHP <- scale(df$EstOHP)
+df$Percentof <- scale(df$Percentof)
+
+# Balance the dataset
+set.seed(42)
+wins <- df[df$Status == 1, ]
+losses <- df[df$Status == 2, ]
+min_n <- min(nrow(wins), nrow(losses))
+df_balanced <- rbind(wins[sample(nrow(wins), min_n), ], losses[sample(nrow(losses), min_n), ])
+df_balanced <- df_balanced[sample(nrow(df_balanced)), ]
+
+# Train/test split
+train_index <- createDataPartition(df_balanced$Status, p = 0.8, list = FALSE)
+train_features <- df_balanced[train_index, !(names(df_balanced) %in% c("Status", "Amount"))]
+train_status <- as.factor(df_balanced$Status[train_index])
+train_amount <- df_balanced$Amount[train_index]
+
+# Train models
+rf_status <- randomForest(x = train_features, y = train_status, ntree = 200, mtry = 3)
+rf_amount <- randomForest(x = train_features, y = train_amount, ntree = 200, mtry = 3)
+
+# UI
+ui <- fluidPage(
+  titlePanel("Project Win Forecast Dashboard"),
+  sidebarLayout(
+    sidebarPanel(
+      dateInput("forecast_dates", "Select Forecast Start Date:", value = as.Date("2025-04-15")),
+      numericInput("num_periods", "How many periods to forecast?", value = 6, min = 1, max = 24),
+      selectInput("forecast_freq", "Frequency:", choices = c("days", "weeks", "months"), selected = "months"),
+      selectInput("client_filter", "Client Type:", choices = c("Existing", "New"), selected = "Existing"),
+      sliderInput("threshold", "Win Probability Threshold (for Simulation):", min = 0, max = 1, value = 0.5, step = 0.01)
+    ),
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Forecast Table", DTOutput("forecastTable")),
+        tabPanel("Monthly Trend", plotOutput("monthlyTrendPlot")),
+        tabPanel("Target OH&P %",
+          sliderInput("target_amount", "Select Project Amount ($):", min = 100000, max = 50000000, value = 20000000, step = 100000),
+          numericInput("target_amount_input", "Or Enter Project Amount ($):", value = 20000000, min = 100000, max = 50000000, step = 100000),
+          plotOutput("ohpPlot")
+        )
+      )
+    )
+  )
+)
+
+# Server
+server <- function(input, output, session) {
+
+  generate_forecast_by_projtype <- function(dates, client_type_input, threshold) {
+    results_list <- list()
+
+    win_profile <- df %>%
+      filter(Status %in% c(1, 2)) %>%
+      mutate(Win = Status == 1) %>%
+      group_by(ProjType) %>%
+      summarise(
+        Avg_Amount = mean(Amount, na.rm = TRUE),
+        Win_Rate = mean(Win),
+        .groups = "drop"
+      )
+
+    for (proj_type in names(proj_type_labels)) {
+      proj_num <- as.numeric(proj_type)
+      profile_row <- win_profile %>% filter(ProjType == proj_num)
+      if (nrow(profile_row) == 0) next
+
+      amount_values <- rnorm(length(dates), mean = profile_row$Avg_Amount, sd = profile_row$Avg_Amount * 0.15)
+      win_probs <- pmin(pmax(rnorm(length(dates), mean = profile_row$Win_Rate, sd = 0.05), 0), 1)
+      simulated_result <- ifelse(win_probs >= threshold, "Win", "Loss")
+
+      results_list[[proj_type_labels[proj_type]]] <- data.frame(
+        ProjectType = proj_type_labels[proj_type],
+        Date = dates,
+        ClientType = client_type_input,
+        Predicted_Win_Probability = round(win_probs, 3),
+        Predicted_Amount = round(amount_values, 2),
+        Simulated_Result = simulated_result
+      )
+    }
+
+    bind_rows(results_list)
+  }
+
+  forecast_data <- reactive({
+    req(input$forecast_dates, input$num_periods, input$forecast_freq)
+    future_dates <- seq(from = input$forecast_dates,
+                        by = input$forecast_freq,
+                        length.out = input$num_periods)
+
+    generate_forecast_by_projtype(future_dates, input$client_filter, input$threshold)
+  })
+
+  output$forecastTable <- renderDT({
+    req(forecast_data())
+    datatable(forecast_data())
+  })
+
+  output$monthlyTrendPlot <- renderPlot({
+    req(forecast_data())
+    df_trend <- forecast_data() %>%
+      mutate(Month = floor_date(as.Date(Date), unit = "month")) %>%
+      group_by(Month, Simulated_Result) %>%
+      summarise(Count = n(), .groups = "drop")
+
+    ggplot(df_trend, aes(x = Month, y = Count, color = Simulated_Result)) +
+      geom_line(size = 1) +
+      geom_point(size = 2) +
+      labs(title = "Simulated Results by Month", x = "Month", y = "Count") +
+      theme_minimal()
+  })
+
+  observeEvent(input$target_amount, {
+    updateNumericInput(session, "target_amount_input", value = input$target_amount)
+  })
+
+  observeEvent(input$target_amount_input, {
+    updateSliderInput(session, "target_amount", value = input$target_amount_input)
+  })
+
+  output$ohpPlot <- renderPlot({
+    req(input$target_amount, input$target_amount_input)
+    target_amount <- input$target_amount_input
+
+    log_model <- lm(Percentof_raw ~ log(Amount), data = df)
+    predicted_percent <- predict(log_model, newdata = data.frame(Amount = target_amount))
+    predicted_OHP <- (predicted_percent / 100) * input$target_amount
+
+    ggplot(df, aes(x = Amount, y = Percentof_raw, color = as.factor(Status))) +
+      geom_point(alpha = 0.6) +
+      geom_smooth(method = "lm", formula = y ~ log(x), color = "black", se = FALSE) +
+      scale_x_continuous(labels = scales::dollar_format()) +
+      scale_color_manual(values = c("1" = "steelblue", "2" = "tomato"), labels = c("Won", "Lost")) +
+      labs(
+        title = "Target OH&P Percentage by Project Amount",
+        x = "Project Amount ($)",
+        y = "OH&P Percentage (%)",
+        color = "Project Status"
+      ) +
+      geom_point(aes(x = target_amount, y = predicted_percent), color = "black", size = 3) +
+      geom_text(aes(x = target_amount, y = predicted_percent,
+                    label = paste0("Target OH&P:\n", round(predicted_percent, 2), "%\n$",
+                                   format(round(predicted_OHP, 2), big.mark = ","))),
+                vjust = -1, hjust = 0.5, size = 4, color = "black") +
+      theme_minimal()
+  })
+}
+
+# Run app
+shinyApp(ui = ui, server = server)
+
+
+```
+
+```{r}
+
+library(TMB)
+library(glmmTMB)
+library(waffle)
+library(plotly)
+library(shiny)
+library(randomForest)
+library(caret)
+library(lubridate)
+library(ggplot2)
+library(dplyr)
+library(DT)
+
+# Lookup for project type labels
+proj_type_labels <- c(
+  "1" = "Wastewater Treatment",
+  "2" = "General Industrial",
+  "3" = "Tank Ring",
+  "4" = "Refinery",
+  "5" = "Industrial Process",
+  "6" = "Utility",
+  "7" = "Civil and Foundation",
+  "8" = "Demolition",
+  "9" = "Piping Replacement",
+  "10" = "Environmental",
+  "11" = "Water Treatment",
+  "12" = "Pipeline"
+)
+
+# Load and preprocess data
+df <- read.csv("estimatingoverview3.20.25.csv")
+df$City <- as.factor(df$City)
+df$State <- as.factor(df$State)
+df <- df[df$Status %in% c(1, 2), ]
+
+# Label client types
+df$ClientType <- factor(df$ClientType, levels = c(1, 2), labels = c("Existing", "New"))
+
+# Save unscaled Percentof for OH&P modeling
+df$Percentof_raw <- df$Percentof
+
+# Normalize for ML use
+df$EstOHP    <- scale(df$EstOHP)
+df$Percentof <- scale(df$Percentof)
+
+# Balance the dataset
+set.seed(42)
+wins   <- df[df$Status == 1, ]
+losses <- df[df$Status == 2, ]
+min_n  <- min(nrow(wins), nrow(losses))
+df_balanced <- rbind(wins[sample(nrow(wins), min_n), ], losses[sample(nrow(losses), min_n), ])
+df_balanced <- df_balanced[sample(nrow(df_balanced)), ]
+
+# Train/test split (for model training below)
+train_index   <- createDataPartition(df_balanced$Status, p = 0.8, list = FALSE)
+train_features <- df_balanced[train_index, !(names(df_balanced) %in% c("Status", "Amount"))]
+train_status   <- as.factor(df_balanced$Status[train_index])
+train_amount   <- df_balanced$Amount[train_index]
+
+# Train models (these models are available for further analysis)
+rf_status <- randomForest(x = train_features, y = train_status, ntree = 200, mtry = 3)
+rf_amount <- randomForest(x = train_features, y = train_amount, ntree = 200, mtry = 3)
+
+# UI
+ui <- fluidPage(
+  titlePanel("Project Win Forecast Dashboard"),
+  sidebarLayout(
+    sidebarPanel(
+      dateInput("forecast_dates", "Select Forecast Start Date:", value = as.Date("2025-04-15")),
+      numericInput("num_periods", "How many periods to forecast?", value = 6, min = 1, max = 24),
+      selectInput("forecast_freq", "Frequency:", choices = c("days", "weeks", "months"), selected = "months"),
+      selectInput("client_filter", "Client Type:", choices = c("Existing", "New"), selected = "Existing"),
+      sliderInput("threshold", "Win Probability Threshold (for Simulation):", min = 0, max = 1, value = 0.5, step = 0.01),
+      # Controls for target project amount (used in the Target OH&P % tab)
+      sliderInput("target_amount", "Select Project Amount ($):", 
+                  min = 100000, max = 50000000, value = 20000000, step = 100000),
+      numericInput("target_amount_input", "Or Enter Project Amount ($):", 
+                   value = 20000000, min = 100000, max = 50000000, step = 100000)
+    ),
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Forecast Table", DTOutput("forecastTable")),
+        tabPanel("Target OH&P %", plotOutput("ohpPlot"))
+      )
+    )
+  )
+)
+
+# Server
+server <- function(input, output, session) {
+  
+  # Synchronize target amount slider and numeric input
+  observeEvent(input$target_amount, {
+    updateNumericInput(session, "target_amount_input", value = input$target_amount)
+  })
+  
+  observeEvent(input$target_amount_input, {
+    updateSliderInput(session, "target_amount", value = input$target_amount_input)
+  })
+  
+  # Forecast simulation: generate forecast data by project type
+  generate_forecast_by_projtype <- function(dates, client_type_input, threshold) {
+    results_list <- list()
+    
+    # Create a win profile by project type
+    win_profile <- df %>%
+      filter(Status %in% c(1, 2)) %>%
+      mutate(Win = (Status == 1)) %>%
+      group_by(ProjType) %>%
+      summarise(
+        Avg_Amount = mean(Amount, na.rm = TRUE),
+        Win_Rate   = mean(Win),
+        .groups    = "drop"
+      )
+    
+    for (proj_type in names(proj_type_labels)) {
+      profile_row <- win_profile %>% filter(as.character(ProjType) == proj_type)
+      if (nrow(profile_row) == 0) next
+      
+      amount_values <- rnorm(length(dates),
+                             mean = profile_row$Avg_Amount,
+                             sd   = profile_row$Avg_Amount * 0.15)
+      win_probs <- pmin(pmax(rnorm(length(dates),
+                                   mean = profile_row$Win_Rate,
+                                   sd   = 0.05), 0), 1)
+      simulated_result <- ifelse(win_probs >= threshold, "Win", "Loss")
+      
+      results_list[[proj_type_labels[proj_type]]] <- data.frame(
+        ProjectType = proj_type_labels[proj_type],
+        Date = dates,
+        ClientType = client_type_input,
+        Predicted_Win_Probability = round(win_probs, 3),
+        Predicted_Amount = round(amount_values, 2),
+        Simulated_Result = simulated_result
+      )
+    }
+    
+    bind_rows(results_list)
+  }
+  
+  forecast_data <- reactive({
+    req(input$forecast_dates, input$num_periods, input$forecast_freq)
+    future_dates <- seq(from = input$forecast_dates,
+                        by = input$forecast_freq,
+                        length.out = input$num_periods)
+    
+    generate_forecast_by_projtype(future_dates, input$client_filter, input$threshold)
+  })
+  
+  output$forecastTable <- renderDT({
+    req(forecast_data())
+    datatable(forecast_data())
+  })
+  
+  output$ohpPlot <- renderPlot({
+    req(input$target_amount, input$target_amount_input)
+    target_amount <- input$target_amount_input
+    
+    # Fit a linear model predicting unscaled Percentof using log(Amount)
+    log_model <- lm(Percentof_raw ~ log(Amount), data = df)
+    predicted_percent <- predict(log_model, newdata = data.frame(Amount = target_amount))
+    predicted_OHP <- (predicted_percent / 100) * target_amount
+    
+    ggplot(df, aes(x = Amount, y = Percentof_raw, color = as.factor(Status))) +
+      geom_point(alpha = 0.6) +
+      geom_smooth(method = "lm", formula = y ~ log(x), color = "black", se = FALSE) +
+      scale_x_continuous(labels = scales::dollar_format()) +
+      scale_color_manual(values = c("1" = "steelblue", "2" = "tomato"), labels = c("Won", "Lost")) +
+      labs(
+        title = "Target OH&P Percentage by Project Amount",
+        x = "Project Amount ($)",
+        y = "OH&P Percentage (%)",
+        color = "Project Status"
+      ) +
+      geom_point(aes(x = target_amount, y = predicted_percent), color = "black", size = 3) +
+      geom_text(aes(x = target_amount, y = predicted_percent,
+                    label = paste0("Target OH&P:\n", round(predicted_percent, 2), "%\n$",
+                                   format(round(predicted_OHP, 2), big.mark = ","))),
+                vjust = -1, hjust = 0.5, size = 4, color = "black") +
+      theme_minimal()
+  })
+}
+
+# Run the app
+shinyApp(ui = ui, server = server)
+
+```
+
+```{r}
+# ---------------------------
+# 1. Load Libraries
+# ---------------------------
+library(tidyverse)
+library(caret)
+library(keras)
+library(tensorflow)
+
+# Uncomment the next line if you haven't set up Keras/TensorFlow yet:
+# install_keras()
+
+# ---------------------------
+# 2. Load and Preprocess Dataset
+# ---------------------------
+file_path <- "estimatingoverview.csv"
+df <- read.csv(file_path)
+
+# Check column names
+print(names(df))
+
+# Convert categorical variables to factors
+df$Status <- as.factor(df$Status)      # Target variable: 1 = Won, 0 = Lost
+df$ClientType <- as.factor(df$ClientType)
+df$ProjType <- as.factor(df$ProjType)
+df$City <- as.factor(df$City)
+df$State <- as.factor(df$State)
+
+# Update project type labels
+proj_type_labels <- c(
+  "1" = "Wastewater Treatment",
+  "2" = "General Industrial",
+  "3" = "Tank Ring",
+  "4" = "Refinery",
+  "5" = "Industrial Process",
+  "6" = "Utility",
+  "7" = "Civil and Foundation",
+  "8" = "Demolition",
+  "9" = "Piping Replacement",
+  "10" = "Environmental",
+  "11" = "Water Treatment",
+  "12" = "Pipeline"
+)
+df$ProjType_Label <- factor(as.character(df$ProjType),
+                            levels = names(proj_type_labels),
+                            labels = proj_type_labels)
+
+# Handle missing EstOHP column
+if (!"EstOHP" %in% names(df)) {
+  df$EstOHP <- 0  # Default value if missing
+  warning("⚠️ 'EstOHP' column not found. Defaulting to 0 in model.")
+}
+
+# Remove rows where Amount or EstOHP is zero or negative (to avoid unrealistic percentages)
+df <- df %>% filter(Amount > 0, EstOHP > 0)
+
+# Create a new column for Overhead & Profit percentage
+df <- df %>% mutate(OH_Percent = (EstOHP / Amount) * 100)
+
+# ---------------------------
+# 3. Visualize Ideal EstOHP Percentage Per Project Type
+# ---------------------------
+ideal_estohp <- df %>%
+  filter(Status == 1) %>%  # Only consider won projects
+  group_by(ProjType_Label) %>%
+  summarize(Ideal_EstOHP_Percent = median(OH_Percent, na.rm = TRUE),
+            .groups = "drop")
+print(ideal_estohp)
+
+ggplot(ideal_estohp, aes(x = reorder(ProjType_Label, Ideal_EstOHP_Percent), y = Ideal_EstOHP_Percent)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  geom_text(aes(label = paste0(round(Ideal_EstOHP_Percent, 1), "%")), 
+            hjust = -0.2, size = 2.5) +
+  coord_flip() +
+  labs(title = "Ideal Overhead & Profit (%) Per Project Type to Win", 
+       x = "Project Type", 
+       y = "Ideal EstOHP (%)") +
+  theme_minimal() +
+  theme(plot.margin = unit(c(1, 4, 1, 1), "cm"))
+
+# ---------------------------
+# 4. Prepare Data for Deep Learning
+# ---------------------------
+# For this example, we'll use the following predictors:
+# ClientType, ProjType, City, State, and Amount.
+predictors <- df %>% select(ClientType, ProjType, City, State, Amount)
+
+# Convert categorical predictors into dummy variables
+predictors_dummy <- model.matrix(~.-1, data = predictors)
+predictors_dummy <- as.data.frame(predictors_dummy)
+
+# Prepare target variables:
+# - Convert Status to numeric (ensure it is 0/1)
+df$Status_num <- as.numeric(as.character(df$Status))
+target1 <- df$Status_num        # Wins/Losses target (binary)
+target2 <- df$OH_Percent        # Overhead & Profit percentage (continuous)
+
+# Split data into training (80%) and testing (20%) sets
+set.seed(123)
+train_index <- createDataPartition(target1, p = 0.8, list = FALSE)
+x_train <- predictors_dummy[train_index, ]
+x_test  <- predictors_dummy[-train_index, ]
+y_train1 <- target1[train_index]
+y_train2 <- target2[train_index]
+y_test1  <- target1[-train_index]
+y_test2  <- target2[-train_index]
+
+# Convert features to matrices (required by Keras)
+x_train <- as.matrix(x_train)
+x_test  <- as.matrix(x_test)
+
+# Scale features for improved training performance
+x_train <- scale(x_train)
+x_test <- scale(x_test)
+
+# ---------------------------
+# 5. Build a Multi-Output Deep Learning Model with Keras
+# ---------------------------
+# Define input shape based on number of features
+input_shape <- ncol(x_train)
+inputs <- layer_input(shape = input_shape)
+
+# Shared hidden layers for common feature extraction
+common <- inputs %>%
+  layer_dense(units = 64, activation = "relu") %>%
+  layer_dropout(rate = 0.3) %>%
+  layer_dense(units = 32, activation = "relu") %>%
+  layer_dropout(rate = 0.3)
+
+# Output for wins/losses (binary classification)
+win_loss_output <- common %>%
+  layer_dense(units = 1, activation = "sigmoid", name = "win_loss_output")
+
+# Output for OH_Percent (regression)
+ohp_output <- common %>%
+  layer_dense(units = 1, activation = "linear", name = "ohp_output")
+
+# Define the multi-output model
+model <- keras_model(inputs = inputs, outputs = c(win_loss_output, ohp_output))
+
+# Compile the model with appropriate losses and metrics
+model %>% compile(
+  optimizer = optimizer_adam(),
+  loss = list(win_loss_output = "binary_crossentropy", ohp_output = "mean_squared_error"),
+  metrics = list(win_loss_output = "accuracy", ohp_output = "mean_absolute_error")
+)
+
+# Display model summary
+summary(model)
+
+# ---------------------------
+# 6. Train the Model
+# ---------------------------
+history <- model %>% fit(
+  x = x_train,
+  y = list(win_loss_output = y_train1, ohp_output = y_train2),
+  epochs = 100,          # Adjust epochs as needed
+  batch_size = 32,
+  validation_split = 0.2
+)
+
+# Plot training history
+plot(history)
+
+# ---------------------------
+# 7. Evaluate the Model
+# ---------------------------
+model_performance <- model %>% evaluate(
+  x_test,
+  list(win_loss_output = y_test1, ohp_output = y_test2)
+)
+print(model_performance)
+
+```
+
+```{r}
+
+library(manipulateWidget)
+library(manipulate)  # Provides slider() and set()
+library(DT)
+library(ggplot2)
+library(dplyr)
+library(scales)
+
+# Simulated example dataset
+set.seed(1)
+df <- data.frame(
+  Amount = runif(200, 1e5, 5e7),
+  Percentof_raw = rnorm(200, 10, 2),
+  Status = sample(c(1, 2), 200, replace = TRUE),
+  ProjType = sample(1:5, 200, replace = TRUE),
+  stringsAsFactors = FALSE
+)
+
+# Label project types (for this example, we use five types)
+proj_type_labels <- c("1" = "Type A", "2" = "Type B", "3" = "Type C", "4" = "Type D", "5" = "Type E")
+
+# Dummy forecast function
+generate_forecast_by_projtype <- function(dates, client_type_input, threshold) {
+  data.frame(
+    ProjectType = sample(proj_type_labels, length(dates), replace = TRUE),
+    Date = dates,
+    ClientType = client_type_input,
+    Predicted_Win_Probability = round(runif(length(dates), 0, 1), 2),
+    Predicted_Amount = round(runif(length(dates), 1e5, 5e7), 0),
+    Simulated_Result = ifelse(runif(length(dates)) > threshold, "Win", "Loss")
+  )
+}
+
+# Interactive widget without a slider for the forecast start date
+manipulateWidget(
+  {
+    # Use a fixed forecast start date
+    forecast_date <- as.Date("2025-04-15")
+    future_dates <- seq(from = forecast_date, by = forecast_freq, length.out = num_periods)
+    
+    forecast_data <- generate_forecast_by_projtype(future_dates, client_filter, threshold)
+    
+    forecast_table_widget <- datatable(forecast_data)
+    
+    # Fit a linear model predicting unscaled Percentof using log(Amount)
+    log_model <- lm(Percentof_raw ~ log(Amount), data = df)
+    predicted_percent <- predict(log_model, newdata = data.frame(Amount = target_amount))
+    predicted_OHP <- (predicted_percent / 100) * target_amount
+    
+    ohp_plot <- ggplot(df, aes(x = Amount, y = Percentof_raw, color = factor(Status))) +
+      geom_point(alpha = 0.6) +
+      geom_smooth(method = "lm", formula = y ~ log(x), color = "black", se = FALSE) +
+      scale_x_continuous(labels = dollar_format()) +
+      labs(
+        title = "Target OH&P Percentage by Project Amount",
+        x = "Project Amount ($)", 
+        y = "OH&P %",
+        color = "Status"
+      ) +
+      geom_point(aes(x = target_amount, y = predicted_percent), color = "black", size = 3) +
+      geom_text(aes(x = target_amount, y = predicted_percent,
+                    label = paste0(round(predicted_percent, 2), "%\n$", 
+                                   format(round(predicted_OHP, 2), big.mark = ","))),
+                vjust = -1, hjust = 0.5, size = 4) +
+      theme_minimal()
+    
+    list(
+      Forecast_Table = forecast_table_widget,
+      OH_Plot = ohp_plot
+    )
+  },
+  num_periods = slider(1, 24, initial = 6, label = "Number of Periods"),
+  forecast_freq = set(c("days", "weeks", "months"), label = "Forecast Frequency"),
+  client_filter = set(c("Existing", "New"), label = "Client Type"),
+  threshold = slider(0, 1, initial = 0.5, step = 0.01, label = "Win Probability Threshold"),
+  target_amount = slider(1e5, 5e7, initial = 2e7, step = 1e5, label = "Target Project Amount ($)")
+)
+
+
+```
