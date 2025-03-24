@@ -1,0 +1,198 @@
+---
+title: "estimating"
+format: html
+editor: visual
+---
+
+## Quarto
+
+Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+
+## Running Code
+
+When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+
+```{r}
+library(TMB)
+library(glmmTMB)
+library(waffle)
+library(plotly)
+library(shiny)
+library(randomForest)
+library(caret)
+library(lubridate)
+library(ggplot2)
+library(dplyr)
+library(DT)
+
+# Lookup for project type labels
+proj_type_labels <- c(
+  "1" = "Wastewater Treatment",
+  "2" = "General Industrial",
+  "3" = "Tank Ring",
+  "4" = "Refinery",
+  "5" = "Industrial Process",
+  "6" = "Utility",
+  "7" = "Civil and Foundation",
+  "8" = "Demolition",
+  "9" = "Piping Replacement",
+  "10" = "Environmental",
+  "11" = "Water Treatment",
+  "12" = "Pipeline"
+)
+
+# Load and preprocess data
+df <- read.csv("estimatingoverview3.20.25.csv")
+df$City <- as.factor(df$City)
+df$State <- as.factor(df$State)
+df <- df[df$Status %in% c(1, 2), ]
+
+# Label client types
+df$ClientType <- factor(df$ClientType, levels = c(1, 2), labels = c("Existing", "New"))
+
+# Save unscaled Percentof for OH&P modeling
+df$Percentof_raw <- df$Percentof
+
+# Normalize for ML use
+df$EstOHP    <- scale(df$EstOHP)
+df$Percentof <- scale(df$Percentof)
+
+# Balance the dataset
+set.seed(42)
+wins   <- df[df$Status == 1, ]
+losses <- df[df$Status == 2, ]
+min_n  <- min(nrow(wins), nrow(losses))
+df_balanced <- rbind(wins[sample(nrow(wins), min_n), ], losses[sample(nrow(losses), min_n), ])
+df_balanced <- df_balanced[sample(nrow(df_balanced)), ]
+
+# Train/test split (for model training below)
+train_index   <- createDataPartition(df_balanced$Status, p = 0.8, list = FALSE)
+train_features <- df_balanced[train_index, !(names(df_balanced) %in% c("Status", "Amount"))]
+train_status   <- as.factor(df_balanced$Status[train_index])
+train_amount   <- df_balanced$Amount[train_index]
+
+# Train models (these models are available for further analysis)
+rf_status <- randomForest(x = train_features, y = train_status, ntree = 200, mtry = 3)
+rf_amount <- randomForest(x = train_features, y = train_amount, ntree = 200, mtry = 3)
+
+# UI
+ui <- fluidPage(
+  titlePanel("Project Win Forecast Dashboard"),
+  sidebarLayout(
+    sidebarPanel(
+      dateInput("forecast_dates", "Select Forecast Start Date:", value = as.Date("2025-04-15")),
+      numericInput("num_periods", "How many periods to forecast?", value = 6, min = 1, max = 24),
+      selectInput("forecast_freq", "Frequency:", choices = c("days", "weeks", "months"), selected = "months"),
+      selectInput("client_filter", "Client Type:", choices = c("Existing", "New"), selected = "Existing"),
+      sliderInput("threshold", "Win Probability Threshold (for Simulation):", min = 0, max = 1, value = 0.5, step = 0.01),
+      # Controls for target project amount (used in the Target OH&P % tab)
+      sliderInput("target_amount", "Select Project Amount ($):", 
+                  min = 100000, max = 50000000, value = 20000000, step = 100000),
+      numericInput("target_amount_input", "Or Enter Project Amount ($):", 
+                   value = 20000000, min = 100000, max = 50000000, step = 100000)
+    ),
+    mainPanel(
+      tabsetPanel(
+        tabPanel("Forecast Table", DTOutput("forecastTable")),
+        tabPanel("Target OH&P %", plotOutput("ohpPlot"))
+      )
+    )
+  )
+)
+
+# Server
+server <- function(input, output, session) {
+  
+  # Synchronize target amount slider and numeric input
+  observeEvent(input$target_amount, {
+    updateNumericInput(session, "target_amount_input", value = input$target_amount)
+  })
+  
+  observeEvent(input$target_amount_input, {
+    updateSliderInput(session, "target_amount", value = input$target_amount_input)
+  })
+  
+  # Forecast simulation: generate forecast data by project type
+  generate_forecast_by_projtype <- function(dates, client_type_input, threshold) {
+    results_list <- list()
+    
+    # Create a win profile by project type
+    win_profile <- df %>%
+      filter(Status %in% c(1, 2)) %>%
+      mutate(Win = (Status == 1)) %>%
+      group_by(ProjType) %>%
+      summarise(
+        Avg_Amount = mean(Amount, na.rm = TRUE),
+        Win_Rate   = mean(Win),
+        .groups    = "drop"
+      )
+    
+    for (proj_type in names(proj_type_labels)) {
+      profile_row <- win_profile %>% filter(as.character(ProjType) == proj_type)
+      if (nrow(profile_row) == 0) next
+      
+      amount_values <- rnorm(length(dates),
+                             mean = profile_row$Avg_Amount,
+                             sd   = profile_row$Avg_Amount * 0.15)
+      win_probs <- pmin(pmax(rnorm(length(dates),
+                                   mean = profile_row$Win_Rate,
+                                   sd   = 0.05), 0), 1)
+      simulated_result <- ifelse(win_probs >= threshold, "Win", "Loss")
+      
+      results_list[[proj_type_labels[proj_type]]] <- data.frame(
+        ProjectType = proj_type_labels[proj_type],
+        Date = dates,
+        ClientType = client_type_input,
+        Predicted_Win_Probability = round(win_probs, 3),
+        Predicted_Amount = round(amount_values, 2),
+        Simulated_Result = simulated_result
+      )
+    }
+    
+    bind_rows(results_list)
+  }
+  
+  forecast_data <- reactive({
+    req(input$forecast_dates, input$num_periods, input$forecast_freq)
+    future_dates <- seq(from = input$forecast_dates,
+                        by = input$forecast_freq,
+                        length.out = input$num_periods)
+    
+    generate_forecast_by_projtype(future_dates, input$client_filter, input$threshold)
+  })
+  
+  output$forecastTable <- renderDT({
+    req(forecast_data())
+    datatable(forecast_data())
+  })
+  
+  output$ohpPlot <- renderPlot({
+    req(input$target_amount, input$target_amount_input)
+    target_amount <- input$target_amount_input
+    
+    # Fit a linear model predicting unscaled Percentof using log(Amount)
+    log_model <- lm(Percentof_raw ~ log(Amount), data = df)
+    predicted_percent <- predict(log_model, newdata = data.frame(Amount = target_amount))
+    predicted_OHP <- (predicted_percent / 100) * target_amount
+    
+    ggplot(df, aes(x = Amount, y = Percentof_raw, color = as.factor(Status))) +
+      geom_point(alpha = 0.6) +
+      geom_smooth(method = "lm", formula = y ~ log(x), color = "black", se = FALSE) +
+      scale_x_continuous(labels = scales::dollar_format()) +
+      scale_color_manual(values = c("1" = "steelblue", "2" = "tomato"), labels = c("Won", "Lost")) +
+      labs(
+        title = "Target OH&P Percentage by Project Amount",
+        x = "Project Amount ($)",
+        y = "OH&P Percentage (%)",
+        color = "Project Status"
+      ) +
+      geom_point(aes(x = target_amount, y = predicted_percent), color = "black", size = 3) +
+      geom_text(aes(x = target_amount, y = predicted_percent,
+                    label = paste0("Target OH&P:\n", round(predicted_percent, 2), "%\n$",
+                                   format(round(predicted_OHP, 2), big.mark = ","))),
+                vjust = -1, hjust = 0.5, size = 4, color = "black") +
+      theme_minimal()
+  })
+}
+
+```
